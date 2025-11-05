@@ -46,7 +46,7 @@ def process_pdf():
         
         # Get form data
         text_input = request.form.get('text', '').strip()
-        font_size = int(request.form.get('font_size', 12))
+        font_size = int(request.form.get('font_size', 10))
         font_family = request.form.get('font_family', 'Helvetica')
         text_color = request.form.get('text_color', '#000000')
         bg_color = request.form.get('bg_color', '#FAFAFA')
