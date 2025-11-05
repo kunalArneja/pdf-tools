@@ -263,3 +263,107 @@ header p {
     font-weight: 600;
 }
 
+.csv-upload-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.csv-upload-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #f8f9ff 0%, #e8f0ff 100%);
+    border: 2px solid #667eea;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 500;
+    color: #667eea;
+}
+
+.csv-upload-label:hover {
+    background: linear-gradient(135deg, #f0f4ff 0%, #dde8ff 100%);
+    border-color: #764ba2;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+}
+
+.csv-upload-label svg {
+    flex-shrink: 0;
+}
+
+.csv-upload-label span {
+    color: #667eea;
+}
+
+.csv-file-name {
+    font-size: 0.9em;
+    color: #0066cc;
+    margin-top: 12px;
+}
+
+.csv-info {
+    font-size: 0.85em;
+    color: #666;
+    margin-top: 12px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.csv-info code {
+    background: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: #d63384;
+}
+
+.download-sample-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 500;
+    margin-top: 8px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.download-sample-link:hover {
+    background: #e8f0ff;
+    color: #764ba2;
+    text-decoration: underline;
+}
+
+.btn-download-sample {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    margin-top: 8px;
+}
+
+.btn-download-sample:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+.btn-download-sample svg {
+    flex-shrink: 0;
+}
+

@@ -26,14 +26,31 @@
                     </label>
                     <div id="file-name" class="file-name"></div>
                     
-                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-                        <label for="csv-upload" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <div class="csv-upload-section">
+                        <label for="csv-upload" class="csv-upload-label">
                             <input type="file" id="csv-upload" name="csv_file" accept=".csv" style="display: none;">
-                            <span style="color: #666;">(Optional) Upload CSV file with filename-to-text mapping</span>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                            <span>(Optional) Upload CSV file with filename-to-text mapping</span>
                         </label>
-                        <div id="csv-file-name" class="file-name" style="font-size: 0.9em; color: #666;"></div>
-                        <div style="font-size: 0.85em; color: #999; margin-top: 8px;">
-                            CSV format: <code>file_name,text</code> (e.g., <code>document.pdf,"Hello World"</code>)
+                        <div id="csv-file-name" class="file-name csv-file-name"></div>
+                        <div class="csv-info">
+                            <div style="margin-bottom: 12px;">
+                                CSV format: <code>file_name,text</code> (e.g., <code>document.pdf,"Hello World"</code>)
+                            </div>
+                            <a href="/static/sample_format.csv" download class="btn btn-download-sample">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                Download Sample CSV File
+                            </a>
                         </div>
                     </div>
                 </div>

@@ -1,0 +1,6 @@
+file_name,text
+document1.pdf,"Invoice Number: INV-001 GL Code: 1234 Amount: $500.00 Office: Tech Vendor ID: V-001 Approval: Approved"
+document2.pdf,"Invoice Number: INV-002 GL Code: 5678 Amount: $750.50 Office: Finance Vendor ID: V-002 Approval: Pending"
+insurance.pdf,"Invoice Number: test2 GL Code: 4566 Amount: $750.50 Office: Tech Vendor ID: V-789 Approval:"
+policyCard.pdf,"Invoice Number: INV-003 GL Code: 9012 Amount: $1200.00 Office: HR Vendor ID: V-003 Approval: Approved"
+
