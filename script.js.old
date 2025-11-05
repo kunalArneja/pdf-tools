@@ -1,0 +1,298 @@
+let pdfDoc = null;
+let originalPdfBytes = null;
+let sourcePdfBytes = null; // Keep original source PDF separate
+let sourceArrayBuffer = null; // Keep original ArrayBuffer
+let sourceFile = null; // Keep reference to the File object
+
+// Initialize PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// File upload handler
+document.getElementById('pdf-upload').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+        showError('Please upload a PDF file');
+        return;
+    }
+
+    document.getElementById('file-name').textContent = `Selected: ${file.name}`;
+    document.getElementById('text-input-section').style.display = 'block';
+    document.getElementById('error-message').classList.remove('show');
+
+    // Store file reference for re-reading later
+    sourceFile = file;
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        // Read file as blob and convert to array buffer to avoid detachment
+        // Create a completely independent copy immediately
+        const fileBlob = file.slice(0, file.size);
+        const independentBuffer = await fileBlob.arrayBuffer();
+        const pdfBytes = new Uint8Array(independentBuffer);
+        
+        // Store the Uint8Array 
+        sourcePdfBytes = pdfBytes;
+        originalPdfBytes = pdfBytes;
+        sourceArrayBuffer = independentBuffer;
+        
+        console.log('PDF loaded, size:', pdfBytes.length, 'bytes');
+        console.log('First few bytes:', Array.from(pdfBytes.slice(0, 10)));
+        
+        // Load PDF for preview
+        pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+        await renderPreview();
+    } catch (error) {
+        showError('Error loading PDF: ' + error.message);
+        console.error('PDF loading error:', error);
+    }
+});
+
+// Process PDF button handler
+document.getElementById('process-btn').addEventListener('click', async () => {
+    const textInput = document.getElementById('text-box').value.trim();
+    
+    if (!sourceFile) {
+        showError('Please upload a PDF first');
+        return;
+    }
+
+    try {
+        document.getElementById('process-btn').textContent = 'Processing...';
+        document.getElementById('process-btn').disabled = true;
+
+        // Get formatting options
+        const fontSize = parseInt(document.getElementById('font-size').value) || 16;
+        const fontFamily = document.getElementById('font-family').value;
+        const textColor = document.getElementById('text-color').value;
+        const bgColor = document.getElementById('bg-color').value;
+
+        await processPDF(textInput, fontSize, fontFamily, textColor, bgColor);
+        
+        document.getElementById('process-btn').textContent = 'Process PDF';
+        document.getElementById('process-btn').disabled = false;
+    } catch (error) {
+        showError('Error processing PDF: ' + error.message);
+        console.error('PDF processing error:', error);
+        document.getElementById('process-btn').textContent = 'Process PDF';
+        document.getElementById('process-btn').disabled = false;
+    }
+});
+
+// Reset button handler
+document.getElementById('reset-btn').addEventListener('click', () => {
+    document.getElementById('pdf-upload').value = '';
+    document.getElementById('file-name').textContent = '';
+    document.getElementById('text-box').value = '';
+    document.getElementById('text-input-section').style.display = 'none';
+    document.getElementById('preview-section').style.display = 'none';
+    document.getElementById('download-section').style.display = 'none';
+    document.getElementById('error-message').classList.remove('show');
+    pdfDoc = null;
+    originalPdfBytes = null;
+    sourcePdfBytes = null;
+    sourceArrayBuffer = null;
+    sourceFile = null;
+});
+
+// Render PDF preview
+async function renderPreview() {
+    const canvas = document.getElementById('pdf-canvas');
+    const context = canvas.getContext('2d');
+    
+    const page = await pdfDoc.getPage(1);
+    const viewport = page.getViewport({ scale: 1.5 });
+    
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    
+    await page.render({
+        canvasContext: context,
+        viewport: viewport
+    }).promise;
+    
+    document.getElementById('preview-section').style.display = 'block';
+}
+
+// Process PDF: add text box to top 25%, shrink content to bottom 75%
+async function processPDF(textInput, fontSize, fontFamily, textColor, bgColor) {
+    const { PDFDocument, rgb, StandardFonts } = PDFLib;
+    
+    // Re-read the file directly using FileReader to avoid any detachment issues
+    let pdfBytesToLoad;
+    if (sourceFile) {
+        try {
+            // Use FileReader to read the file fresh
+            const fileReader = new FileReader();
+            const bufferPromise = new Promise((resolve, reject) => {
+                fileReader.onload = (e) => resolve(e.target.result);
+                fileReader.onerror = reject;
+                fileReader.readAsArrayBuffer(sourceFile);
+            });
+            
+            const freshBuffer = await bufferPromise;
+            pdfBytesToLoad = new Uint8Array(freshBuffer);
+            console.log('Re-read file via FileReader, size:', pdfBytesToLoad.length);
+        } catch (error) {
+            console.error('Error re-reading file:', error);
+            throw new Error('Failed to read PDF file: ' + error.message);
+        }
+    } else {
+        throw new Error('No PDF file available');
+    }
+    
+    // Verify PDF bytes are valid
+    const bytesForCheck = pdfBytesToLoad;
+    
+    console.log('Processing PDF, bytes length:', bytesForCheck.length);
+    console.log('First bytes:', Array.from(bytesForCheck.slice(0, 10)));
+    
+    // Check if it starts with PDF header (%PDF)
+    const header = String.fromCharCode(...bytesForCheck.slice(0, 4));
+    console.log('PDF header:', header);
+    
+    if (header !== '%PDF') {
+        throw new Error('Invalid PDF file: does not start with PDF header. Got: ' + header);
+    }
+    
+    // Load the PDF - PDF-lib accepts ArrayBuffer or Uint8Array
+    let sourcePdf;
+    try {
+        sourcePdf = await PDFDocument.load(pdfBytesToLoad);
+    } catch (error) {
+        console.error('PDF-lib load error:', error);
+        console.error('PDF bytes type:', typeof pdfBytesToLoad, pdfBytesToLoad instanceof ArrayBuffer, pdfBytesToLoad instanceof Uint8Array);
+        throw new Error('Failed to load PDF: ' + error.message);
+    }
+    
+    // Create a new PDF document
+    const pdfDoc = await PDFDocument.create();
+    
+    // Get the first page dimensions
+    const sourcePages = sourcePdf.getPages();
+    if (sourcePages.length === 0) {
+        throw new Error('PDF has no pages');
+    }
+    
+    const firstSourcePage = sourcePages[0];
+    const { width, height } = firstSourcePage.getSize();
+    
+    // Calculate dimensions
+    const textBoxHeight = height * 0.25; // Top 25%
+    const contentHeight = height * 0.75; // Bottom 75%
+    
+    // Create a new first page with the same dimensions
+    const newFirstPage = pdfDoc.addPage([width, height]);
+    
+    // Embed the original first page content and scale it to fit in bottom 75%
+    const scaleFactor = contentHeight / height;
+    const scaledWidth = width * scaleFactor;
+    const xOffset = (width - scaledWidth) / 2; // Center horizontally
+    
+    // Embed and draw the original first page scaled down
+    const [copiedPage] = await pdfDoc.copyPages(sourcePdf, [0]);
+    newFirstPage.drawPage(copiedPage, {
+        x: xOffset,
+        y: 0,
+        width: scaledWidth,
+        height: contentHeight,
+    });
+    
+    // Add text box at top 25% (drawn on top of the scaled content)
+    if (textInput) {
+        // Get font based on selection
+        let font;
+        switch(fontFamily) {
+            case 'Times-Roman':
+                font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+                break;
+            case 'Courier':
+                font = await pdfDoc.embedFont(StandardFonts.Courier);
+                break;
+            case 'Helvetica':
+            default:
+                font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+                break;
+        }
+        
+        // Convert hex color to RGB
+        const bgRgb = hexToRgb(bgColor);
+        const textRgb = hexToRgb(textColor);
+        
+        // Draw background rectangle for text box
+        newFirstPage.drawRectangle({
+            x: 0,
+            y: height - textBoxHeight,
+            width: width,
+            height: textBoxHeight,
+            borderColor: rgb(0.8, 0.8, 0.8),
+            borderWidth: 1,
+            color: rgb(bgRgb.r / 255, bgRgb.g / 255, bgRgb.b / 255),
+        });
+        
+        // Ensure font size is reasonable for the text box
+        const finalFontSize = Math.min(Math.max(fontSize, 8), Math.min(72, textBoxHeight / 4));
+        
+        // Add the text with word wrapping
+        newFirstPage.drawText(textInput, {
+            x: 20,
+            y: height - textBoxHeight + 20,
+            size: finalFontSize,
+            font: font,
+            color: rgb(textRgb.r / 255, textRgb.g / 255, textRgb.b / 255),
+            maxWidth: width - 40,
+            lineHeight: finalFontSize * 1.2,
+        });
+    }
+    
+    // Copy all remaining pages from the source PDF
+    if (sourcePages.length > 1) {
+        const remainingPages = await pdfDoc.copyPages(sourcePdf, 
+            Array.from({ length: sourcePages.length - 1 }, (_, i) => i + 1)
+        );
+        remainingPages.forEach((page) => {
+            pdfDoc.addPage(page);
+        });
+    }
+    
+    // Save the modified PDF
+    const pdfBytes = await pdfDoc.save();
+    
+    // Create download link
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const downloadLink = document.getElementById('download-link');
+    downloadLink.href = url;
+    downloadLink.download = 'modified.pdf';
+    document.getElementById('download-section').style.display = 'block';
+    
+    // Update preview
+    try {
+        const newPdfDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+        pdfDoc = newPdfDoc;
+        originalPdfBytes = pdfBytes; // Keep for preview, but don't overwrite sourcePdfBytes
+        await renderPreview();
+    } catch (error) {
+        console.error('Preview error:', error);
+        // Continue even if preview fails
+    }
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : { r: 0, g: 0, b: 0 };
+}
+
+// Show error message
+function showError(message) {
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.textContent = message;
+    errorDiv.classList.add('show');
+}
+

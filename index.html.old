@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Tools - Add Text Box</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PDF Tools</h1>
+            <p>Add a text box to the top 25% of the first page</p>
+        </header>
+
+        <main>
+            <div class="upload-section">
+                <label for="pdf-upload" class="upload-label">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <span>Click to upload PDF</span>
+                    <input type="file" id="pdf-upload" accept=".pdf" hidden>
+                </label>
+                <div id="file-name" class="file-name"></div>
+            </div>
+
+            <div class="text-input-section" id="text-input-section" style="display: none;">
+                <label for="text-box">Enter text for the top section:</label>
+                <textarea id="text-box" placeholder="Enter your text here..."></textarea>
+                
+                <div class="formatting-controls">
+                    <div class="control-group">
+                        <label for="font-size">Font Size:</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="font-size" min="8" max="72" value="16" step="1" style="flex: 1;">
+                            <span class="control-unit">pt</span>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="font-family">Font:</label>
+                        <select id="font-family">
+                            <option value="Helvetica">Helvetica</option>
+                            <option value="Times-Roman">Times Roman</option>
+                            <option value="Courier">Courier</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="text-color">Text Color:</label>
+                        <input type="color" id="text-color" value="#000000">
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="bg-color">Background Color:</label>
+                        <input type="color" id="bg-color" value="#FAFAFA">
+                    </div>
+                </div>
+                
+                <div class="buttons">
+                    <button id="process-btn" class="btn btn-primary">Process PDF</button>
+                    <button id="reset-btn" class="btn btn-secondary">Reset</button>
+                </div>
+            </div>
+
+            <div id="preview-section" class="preview-section" style="display: none;">
+                <h3>Preview</h3>
+                <canvas id="pdf-canvas"></canvas>
+            </div>
+
+            <div id="download-section" class="download-section" style="display: none;">
+                <a id="download-link" class="btn btn-success">Download Modified PDF</a>
+            </div>
+
+            <div id="error-message" class="error-message"></div>
+        </main>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+

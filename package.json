@@ -1,0 +1,16 @@
+{
+  "name": "pdf-tools",
+  "version": "1.0.0",
+  "description": "PDF manipulation tool to add text boxes to PDFs",
+  "scripts": {
+    "start": "npx http-server . -p 8080 -o"
+  },
+  "keywords": [
+    "pdf",
+    "manipulation",
+    "text-box"
+  ],
+  "author": "",
+  "license": "MIT"
+}
+
