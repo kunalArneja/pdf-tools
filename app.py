@@ -2,13 +2,16 @@ from flask import Flask, render_template, request, send_file, redirect, url_for
 from werkzeug.utils import secure_filename
 import io
 import os
+import zipfile
+import csv
+import re
 from PyPDF2 import PdfReader, PdfWriter, Transformation
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 import tempfile
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max folder size
 app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()
 
 # Allowed file extensions
@@ -24,43 +27,116 @@ def index():
 @app.route('/process', methods=['POST'])
 def process_pdf():
     try:
-        # Check if file is present
-        if 'file' not in request.files:
-            return redirect_with_error('No file provided')
+        # Check if files are present
+        if 'files' not in request.files:
+            return redirect_with_error('No files provided')
         
-        file = request.files['file']
-        if file.filename == '':
-            return redirect_with_error('No file selected')
+        files = request.files.getlist('files')
+        if not files or len(files) == 0:
+            return redirect_with_error('No files selected')
         
-        if not allowed_file(file.filename):
-            return redirect_with_error('Invalid file type. Please upload a PDF.')
+        # Filter only PDF files
+        pdf_files = []
+        for file in files:
+            if file.filename and allowed_file(file.filename):
+                pdf_files.append(file)
+        
+        if len(pdf_files) == 0:
+            return redirect_with_error('No PDF files found in the selected folder')
         
         # Get form data
         text_input = request.form.get('text', '').strip()
-        font_size = int(request.form.get('font_size', 16))
+        font_size = int(request.form.get('font_size', 12))
         font_family = request.form.get('font_family', 'Helvetica')
         text_color = request.form.get('text_color', '#000000')
         bg_color = request.form.get('bg_color', '#FAFAFA')
         
-        # Read PDF file
-        pdf_bytes = file.read()
+        # Parse CSV file if provided
+        csv_mapping = {}
+        csv_file = request.files.get('csv_file')
+        if csv_file and csv_file.filename:
+            try:
+                csv_data = csv_file.read().decode('utf-8')
+                csv_reader = csv.DictReader(io.StringIO(csv_data))
+                
+                # Handle both 'file_name' and 'filename' as column names
+                for row in csv_reader:
+                    filename = None
+                    text = None
+                    
+                    # Try different possible column names
+                    for key in row.keys():
+                        key_lower = key.lower().strip()
+                        if key_lower in ['file_name', 'filename', 'file']:
+                            filename = row[key].strip() if row[key] else None
+                        elif key_lower == 'text':
+                            text = row[key].strip() if row[key] else None
+                    
+                    if filename and text:
+                        # Normalize filename (remove path if present, keep just the name)
+                        filename = os.path.basename(filename.strip())
+                        # Store both with and without .pdf extension for flexible matching
+                        csv_mapping[filename] = text
+                        if filename.lower().endswith('.pdf'):
+                            csv_mapping[filename[:-4]] = text
+                        
+            except Exception as e:
+                return redirect_with_error(f'Error parsing CSV file: {str(e)}')
         
-        # Get original filename and create new filename with _p suffix
-        original_filename = secure_filename(file.filename)
-        if original_filename.endswith('.pdf'):
-            download_name = original_filename[:-4] + '_p.pdf'
-        else:
-            download_name = original_filename + '_p.pdf'
+        # Process all PDFs and create zip file
+        zip_buffer = io.BytesIO()
+        processed_count = 0
         
-        # Process PDF
-        output_pdf = process_pdf_file(pdf_bytes, text_input, font_size, font_family, text_color, bg_color)
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for file in pdf_files:
+                try:
+                    # Read PDF file (need to reset file pointer if already read)
+                    file.seek(0)
+                    pdf_bytes = file.read()
+                    
+                    # Determine text to use for this file
+                    # Extract just the basename for matching (before secure_filename modifies it)
+                    filename_basename = os.path.basename(file.filename)
+                    original_filename = secure_filename(file.filename)
+                    
+                    # Try to find matching text in CSV (try exact match, then without extension)
+                    file_text = csv_mapping.get(filename_basename, None)
+                    if file_text is None and filename_basename.lower().endswith('.pdf'):
+                        file_text = csv_mapping.get(filename_basename[:-4], None)
+                    if file_text is None:
+                        file_text = text_input  # Fallback to manual text input
+                    
+                    # Process PDF
+                    output_pdf = process_pdf_file(pdf_bytes, file_text, font_size, font_family, text_color, bg_color)
+                    
+                    # Get original filename and create new filename with _p suffix
+                    if filename_basename.endswith('.pdf'):
+                        output_filename = filename_basename[:-4] + '_p.pdf'
+                    else:
+                        output_filename = filename_basename + '_p.pdf'
+                    
+                    # Add processed PDF to zip
+                    zip_file.writestr(output_filename, output_pdf)
+                    processed_count += 1
+                    
+                except Exception as e:
+                    # Log error but continue processing other files
+                    import traceback
+                    print(f"Error processing {file.filename}: {str(e)}")
+                    print(traceback.format_exc())
+                    continue
         
-        # Return PDF as download
+        if processed_count == 0:
+            return redirect_with_error('No PDFs were successfully processed. Check that the PDFs are valid and CSV mappings are correct.')
+        
+        zip_buffer.seek(0)
+        
+        # Return zip file as download
         return send_file(
-            io.BytesIO(output_pdf),
-            mimetype='application/pdf',
+            zip_buffer,
+            mimetype='application/zip',
             as_attachment=True,
-            download_name=download_name
+            download_name='processed_pdfs.zip'
         )
     
     except Exception as e:
@@ -142,8 +218,46 @@ def process_pdf_file(pdf_bytes, text_input, font_size, font_family, text_color, 
         textobject.setFont(font_name, font_size)
         textobject.setFillColor(colors.Color(text_rgb[0]/255, text_rgb[1]/255, text_rgb[2]/255))
         
+        # Add an empty line first
+        textobject.textLine('')
+        
+        # Parse and format text - split by "Key: Value" pattern
+        # Handle both newline-separated and space-separated key-value pairs
+        lines_to_display = []
+        
+        # First, check if text contains newlines (already formatted)
+        if '\n' in text_input:
+            lines_to_display = [line.strip() for line in text_input.split('\n') if line.strip()]
+        else:
+            # Parse space-separated "Key: Value" pairs
+            # Split by pattern like "Key: Value" where Value may contain spaces until next "Key:"
+            # Pattern to match "Key: Value" pairs
+            # Matches: word(s) followed by colon, then value until next word(s) followed by colon or end
+            pattern = r'([^:]+):\s*([^:]+?)(?=\s+[^:]+:\s*|$)'
+            matches = re.findall(pattern, text_input)
+            
+            if matches:
+                # Format each match as "Key: Value"
+                lines_to_display = [f"{key.strip()}: {value.strip()}" for key, value in matches]
+            else:
+                # Fallback: split by spaces and try to find colons
+                parts = text_input.split()
+                current_line = ""
+                for part in parts:
+                    if ':' in part and current_line:
+                        # This part starts a new key-value pair
+                        lines_to_display.append(current_line.strip())
+                        current_line = part
+                    else:
+                        if current_line:
+                            current_line += " " + part
+                        else:
+                            current_line = part
+                if current_line:
+                    lines_to_display.append(current_line.strip())
+        
         # Add each line of text
-        for line in text_input.split('\n'):
+        for line in lines_to_display:
             if line.strip():
                 textobject.textLine(line.strip())
         
@@ -158,12 +272,12 @@ def process_pdf_file(pdf_bytes, text_input, font_size, font_family, text_color, 
     transformation = Transformation().scale(sx=1.0, sy=scale_factor_y).translate(tx=0, ty=0)
     modified_first_page.add_transformation(transformation)
     
-    # Read overlay PDF
+    # Read overlay PDF and merge if it has content
     overlay_reader = PdfReader(overlay_pdf)
-    overlay_page = overlay_reader.pages[0]
-    
-    # Merge the text overlay ON TOP of the transformed page
-    modified_first_page.merge_page(overlay_page)
+    if len(overlay_reader.pages) > 0:
+        overlay_page = overlay_reader.pages[0]
+        # Merge the text overlay ON TOP of the transformed page
+        modified_first_page.merge_page(overlay_page)
     
     # Add the modified first page to the writer
     pdf_writer.add_page(modified_first_page)
@@ -182,7 +296,13 @@ def process_pdf_file(pdf_bytes, text_input, font_size, font_family, text_color, 
 def hex_to_rgb(hex_color):
     """Convert hex color to RGB tuple"""
     hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    if len(hex_color) != 6:
+        # Default to black if invalid
+        hex_color = '000000'
+    try:
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return (0, 0, 0)  # Default to black
 
 def get_font_name(font_family):
     """Get ReportLab font name from font family selection"""

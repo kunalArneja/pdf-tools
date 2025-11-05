@@ -21,21 +21,32 @@
                             <polyline points="17 8 12 3 7 8"></polyline>
                             <line x1="12" y1="3" x2="12" y2="15"></line>
                         </svg>
-                        <span>Click to upload PDF</span>
-                        <input type="file" id="pdf-upload" name="file" accept=".pdf" hidden required>
+                        <span>Click to upload folder</span>
+                        <input type="file" id="pdf-upload" name="files" webkitdirectory directory multiple accept=".pdf" hidden required>
                     </label>
                     <div id="file-name" class="file-name"></div>
+                    
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                        <label for="csv-upload" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="file" id="csv-upload" name="csv_file" accept=".csv" style="display: none;">
+                            <span style="color: #666;">(Optional) Upload CSV file with filename-to-text mapping</span>
+                        </label>
+                        <div id="csv-file-name" class="file-name" style="font-size: 0.9em; color: #666;"></div>
+                        <div style="font-size: 0.85em; color: #999; margin-top: 8px;">
+                            CSV format: <code>file_name,text</code> (e.g., <code>document.pdf,"Hello World"</code>)
+                        </div>
+                    </div>
                 </div>
 
                 <div class="text-input-section" id="text-input-section" style="display: none;">
-                    <label for="text-box">Enter text for the top section:</label>
+                    <label for="text-box">Enter text for the top section (used if CSV not provided or file not found in CSV):</label>
                     <textarea id="text-box" name="text" placeholder="Enter your text here..."></textarea>
                     
                     <div class="formatting-controls">
                         <div class="control-group">
                             <label for="font-size">Font Size:</label>
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <input type="number" id="font-size" name="font_size" min="8" max="72" value="16" step="1" style="flex: 1;">
+                                <input type="number" id="font-size" name="font_size" min="8" max="72" value="12" step="1" style="flex: 1;">
                                 <span class="control-unit">pt</span>
                             </div>
                         </div>
@@ -61,7 +72,7 @@
                     </div>
                     
                     <div class="buttons">
-                        <button type="submit" id="process-btn" class="btn btn-primary">Process PDF</button>
+                        <button type="submit" id="process-btn" class="btn btn-primary">Process All PDFs</button>
                         <button type="button" id="reset-btn" class="btn btn-secondary">Reset</button>
                     </div>
                 </div>
@@ -72,41 +83,65 @@
     </div>
 
     <script>
-        // File upload handler
-        document.getElementById('pdf-upload').addEventListener('change', function(e) {
+        // CSV upload handler
+        document.getElementById('csv-upload').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
-                document.getElementById('file-name').textContent = `Selected: ${file.name}`;
-                document.getElementById('text-input-section').style.display = 'block';
-                document.getElementById('error-message').classList.remove('show');
+                document.getElementById('csv-file-name').textContent = `CSV: ${file.name}`;
+            } else {
+                document.getElementById('csv-file-name').textContent = '';
+            }
+        });
+
+        // File upload handler
+        document.getElementById('pdf-upload').addEventListener('change', function(e) {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+                const pdfFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+                if (pdfFiles.length > 0) {
+                    document.getElementById('file-name').textContent = `Selected folder: ${pdfFiles.length} PDF file(s)`;
+                    document.getElementById('text-input-section').style.display = 'block';
+                    document.getElementById('error-message').classList.remove('show');
+                } else {
+                    showError('No PDF files found in the selected folder');
+                    document.getElementById('pdf-upload').value = '';
+                }
             }
         });
 
         // Form submission handler
         document.getElementById('pdf-form').addEventListener('submit', function(e) {
             const fileInput = document.getElementById('pdf-upload');
-            if (!fileInput.files || !fileInput.files[0]) {
+            if (!fileInput.files || fileInput.files.length === 0) {
                 e.preventDefault();
-                showError('Please upload a PDF file first');
+                showError('Please upload a folder with PDF files first');
+                return false;
+            }
+            
+            const pdfFiles = Array.from(fileInput.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+            if (pdfFiles.length === 0) {
+                e.preventDefault();
+                showError('No PDF files found in the selected folder');
                 return false;
             }
             
             const processBtn = document.getElementById('process-btn');
-            processBtn.textContent = 'Processing...';
+            processBtn.textContent = `Processing ${pdfFiles.length} file(s)...`;
             processBtn.disabled = true;
             
             // Reset button after form submission completes (for successful downloads)
             // The form will navigate away, so this is mainly for error cases
             setTimeout(function() {
-                processBtn.textContent = 'Process PDF';
+                processBtn.textContent = 'Process All PDFs';
                 processBtn.disabled = false;
-            }, 5000);
+            }, 60000); // Increased timeout for multiple files
         });
 
         // Reset button handler
         document.getElementById('reset-btn').addEventListener('click', function() {
             document.getElementById('pdf-form').reset();
             document.getElementById('file-name').textContent = '';
+            document.getElementById('csv-file-name').textContent = '';
             document.getElementById('text-input-section').style.display = 'none';
             document.getElementById('error-message').classList.remove('show');
         });
