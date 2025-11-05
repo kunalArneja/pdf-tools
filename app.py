@@ -231,14 +231,22 @@ def process_pdf_file(pdf_bytes, text_input, font_size, font_family, text_color, 
         else:
             # Parse space-separated "Key: Value" pairs
             # Split by pattern like "Key: Value" where Value may contain spaces until next "Key:"
-            # Pattern to match "Key: Value" pairs
-            # Matches: word(s) followed by colon, then value until next word(s) followed by colon or end
-            pattern = r'([^:]+):\s*([^:]+?)(?=\s+[^:]+:\s*|$)'
+            # Pattern to match "Key: Value" pairs, including empty values
+            # Matches: word(s) followed by colon, then optional value until next word(s) followed by colon or end
+            pattern = r'([^:]+):\s*([^:]*?)(?=\s+[^:]+:\s*|$)'
             matches = re.findall(pattern, text_input)
             
             if matches:
-                # Format each match as "Key: Value"
-                lines_to_display = [f"{key.strip()}: {value.strip()}" for key, value in matches]
+                # Format each match as "Key: Value" (even if value is empty)
+                lines_to_display = []
+                for key, value in matches:
+                    key = key.strip()
+                    value = value.strip()
+                    if value:
+                        lines_to_display.append(f"{key}: {value}")
+                    else:
+                        # Display field name even if value is empty
+                        lines_to_display.append(f"{key}:")
             else:
                 # Fallback: split by spaces and try to find colons
                 parts = text_input.split()
