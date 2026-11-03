@@ -14,6 +14,7 @@
 
         <main>
             <form id="pdf-form" enctype="multipart/form-data" method="POST" action="/process">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="upload-section">
                     <label for="pdf-upload" class="upload-label">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

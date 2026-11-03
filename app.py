@@ -1,20 +1,86 @@
-from flask import Flask, render_template, request, send_file, redirect, url_for
-from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, send_file, redirect, url_for, Response, abort
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
+import hmac
 import io
 import os
+import secrets
 import zipfile
 import csv
 import re
-from PyPDF2 import PdfReader, PdfWriter, Transformation
+import logging
+from pypdf import PdfReader, PdfWriter, Transformation
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
-import tempfile
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+log = logging.getLogger('pdf-tools')
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max folder size
-app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()
 
-# Allowed file extensions
+# App Engine / Cloud Run sit behind one Google proxy that sets X-Forwarded-For / X-Forwarded-Proto.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+# --- Authentication (HTTP Basic) -------------------------------------------------
+# Credentials come only from the environment: env.yaml for App Engine (see
+# env.yaml.example), --set-env-vars or Secret Manager for Cloud Run, or exported
+# shell variables for local runs. They are deliberately not stored in the code.
+AUTH_USERNAME = os.environ.get('APP_USERNAME')
+AUTH_PASSWORD = os.environ.get('APP_PASSWORD')
+if not AUTH_USERNAME or not AUTH_PASSWORD:
+    raise RuntimeError('APP_USERNAME and APP_PASSWORD environment variables must be set (see env.yaml.example)')
+
+def credentials_ok(auth):
+    if not auth or auth.type != 'basic' or auth.username is None or auth.password is None:
+        return False
+    user_ok = hmac.compare_digest(auth.username.encode(), AUTH_USERNAME.encode())
+    pass_ok = hmac.compare_digest(auth.password.encode(), AUTH_PASSWORD.encode())
+    return user_ok and pass_ok
+
+# --- Rate limiting ----------------------------------------------------------------
+# In-memory store: limits apply per instance, which is sufficient as a brute-force
+# and abuse brake for a small internal tool.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=['120 per minute'],
+    storage_uri='memory://',
+)
+
+# --- CSRF (double-submit cookie, no server-side state) ------------------------------
+CSRF_COOKIE = 'csrf_token'
+
+def is_https():
+    return request.scheme == 'https'
+
+@app.before_request
+def require_auth():
+    if request.path.startswith('/static/'):
+        return None
+    if not credentials_ok(request.authorization):
+        log.warning('Rejected unauthenticated request from %s', get_remote_address())
+        return Response(
+            'Authentication required', 401,
+            {'WWW-Authenticate': 'Basic realm="PDF Tools", charset="UTF-8"'},
+        )
+    return None
+
+@app.after_request
+def security_headers(resp):
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['Content-Security-Policy'] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
+    )
+    if is_https():
+        resp.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return resp
+
 ALLOWED_EXTENSIONS = {'pdf'}
 
 def allowed_file(filename):
@@ -22,129 +88,122 @@ def allowed_file(filename):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    token = request.cookies.get(CSRF_COOKIE) or secrets.token_urlsafe(32)
+    resp = Response(render_template('index.html', csrf_token=token))
+    resp.set_cookie(CSRF_COOKIE, token, httponly=True, samesite='Strict', secure=is_https())
+    return resp
+
+def csrf_ok():
+    cookie = request.cookies.get(CSRF_COOKIE, '')
+    form = request.form.get('csrf_token', '')
+    return bool(cookie) and hmac.compare_digest(cookie, form)
 
 @app.route('/process', methods=['POST'])
+@limiter.limit('20 per minute')
 def process_pdf():
+    if not csrf_ok():
+        abort(403)
     try:
-        # Check if files are present
         if 'files' not in request.files:
             return redirect_with_error('No files provided')
-        
+
         files = request.files.getlist('files')
-        if not files or len(files) == 0:
+        if not files:
             return redirect_with_error('No files selected')
-        
-        # Filter only PDF files
-        pdf_files = []
-        for file in files:
-            if file.filename and allowed_file(file.filename):
-                pdf_files.append(file)
-        
-        if len(pdf_files) == 0:
+
+        pdf_files = [f for f in files if f.filename and allowed_file(f.filename)]
+        if not pdf_files:
             return redirect_with_error('No PDF files found in the selected folder')
-        
-        # Get form data
+
         text_input = request.form.get('text', '').strip()
-        font_size = int(request.form.get('font_size', 10))
+        try:
+            font_size = int(request.form.get('font_size', 10))
+        except ValueError:
+            return redirect_with_error('Font size must be a whole number')
+        font_size = max(8, min(72, font_size))
         font_family = request.form.get('font_family', 'Helvetica')
         text_color = request.form.get('text_color', '#000000')
         bg_color = request.form.get('bg_color', '#FAFAFA')
-        
+
         # Parse CSV file if provided
         csv_mapping = {}
         csv_file = request.files.get('csv_file')
         if csv_file and csv_file.filename:
             try:
-                csv_data = csv_file.read().decode('utf-8')
+                csv_data = csv_file.read().decode('utf-8-sig')
                 csv_reader = csv.DictReader(io.StringIO(csv_data))
-                
-                # Handle both 'file_name' and 'filename' as column names
                 for row in csv_reader:
                     filename = None
                     text = None
-                    
-                    # Try different possible column names
                     for key in row.keys():
+                        if key is None:
+                            continue
                         key_lower = key.lower().strip()
                         if key_lower in ['file_name', 'filename', 'file']:
                             filename = row[key].strip() if row[key] else None
                         elif key_lower == 'text':
                             text = row[key].strip() if row[key] else None
-                    
                     if filename and text:
-                        # Normalize filename (remove path if present, keep just the name)
                         filename = os.path.basename(filename.strip())
-                        # Store both with and without .pdf extension for flexible matching
                         csv_mapping[filename] = text
                         if filename.lower().endswith('.pdf'):
                             csv_mapping[filename[:-4]] = text
-                        
-            except Exception as e:
-                return redirect_with_error(f'Error parsing CSV file: {str(e)}')
-        
-        # Process all PDFs and create zip file
+            except Exception:
+                log.warning('CSV parse failure', exc_info=True)
+                return redirect_with_error('The CSV file could not be read. Check that it is UTF-8 text with file_name and text columns.')
+
         zip_buffer = io.BytesIO()
         processed_count = 0
-        
+        failed_count = 0
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for file in pdf_files:
+            for index, file in enumerate(pdf_files):
                 try:
-                    # Read PDF file (need to reset file pointer if already read)
                     file.seek(0)
                     pdf_bytes = file.read()
-                    
-                    # Determine text to use for this file
-                    # Extract just the basename for matching (before secure_filename modifies it)
+
                     filename_basename = os.path.basename(file.filename)
-                    original_filename = secure_filename(file.filename)
-                    
-                    # Try to find matching text in CSV (try exact match, then without extension)
-                    file_text = csv_mapping.get(filename_basename, None)
+
+                    file_text = csv_mapping.get(filename_basename)
                     if file_text is None and filename_basename.lower().endswith('.pdf'):
-                        file_text = csv_mapping.get(filename_basename[:-4], None)
+                        file_text = csv_mapping.get(filename_basename[:-4])
                     if file_text is None:
-                        file_text = text_input  # Fallback to manual text input
-                    
-                    # Process PDF
+                        file_text = text_input
+
                     output_pdf = process_pdf_file(pdf_bytes, file_text, font_size, font_family, text_color, bg_color)
-                    
-                    # Get original filename and create new filename with _p suffix
-                    if filename_basename.endswith('.pdf'):
+
+                    if filename_basename.lower().endswith('.pdf'):
                         output_filename = filename_basename[:-4] + '_p.pdf'
                     else:
                         output_filename = filename_basename + '_p.pdf'
-                    
-                    # Add processed PDF to zip
+
                     zip_file.writestr(output_filename, output_pdf)
                     processed_count += 1
-                    
                 except Exception as e:
-                    # Log error but continue processing other files
-                    import traceback
-                    print(f"Error processing {file.filename}: {str(e)}")
-                    print(traceback.format_exc())
+                    # Deliberately do not log the filename or document contents.
+                    failed_count += 1
+                    log.warning('Failed to process file #%d of %d: %s', index + 1, len(pdf_files), type(e).__name__)
                     continue
-        
+
+        log.info('Processed %d file(s), %d failed', processed_count, failed_count)
+
         if processed_count == 0:
             return redirect_with_error('No PDFs were successfully processed. Check that the PDFs are valid and CSV mappings are correct.')
-        
+
         zip_buffer.seek(0)
-        
-        # Return zip file as download
         return send_file(
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
-            download_name='processed_pdfs.zip'
+            download_name='processed_pdfs.zip',
         )
-    
-    except Exception as e:
-        return redirect_with_error(str(e))
+
+    except Exception:
+        log.error('Unhandled error in /process', exc_info=True)
+        return redirect_with_error('An unexpected error occurred while processing. Please try again.')
 
 def redirect_with_error(error_message):
-    """Redirect to index with error message"""
-    from flask import redirect, url_for
+    """Redirect to index with a user-facing error message"""
     return redirect(url_for('index', error=error_message))
 
 def process_pdf_file(pdf_bytes, text_input, font_size, font_family, text_color, bg_color):
@@ -323,15 +382,14 @@ def get_font_name(font_family):
 
 if __name__ == '__main__':
     import sys
-    import os
-    # Check if we're in a virtual environment
     if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
-        # Get port from environment variable (for Cloud Run/App Engine) or default to 8080
         port = int(os.environ.get('PORT', 8080))
-        app.run(debug=True, port=port, host='0.0.0.0')
+        # Debug mode is never enabled here: the Werkzeug debugger allows remote code
+        # execution. Bind to localhost unless HOST is set explicitly (containers use gunicorn).
+        host = os.environ.get('HOST', '127.0.0.1')
+        app.run(debug=False, port=port, host=host)
     else:
         print("Please activate the virtual environment first:")
         print("source venv/bin/activate")
         print("Then run: python app.py")
         sys.exit(1)
-

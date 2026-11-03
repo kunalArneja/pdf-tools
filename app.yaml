@@ -5,6 +5,11 @@ instance_class: F2
 env_variables:
   PYTHONUNBUFFERED: '1'
 
+# Login credentials live in env.yaml, which is git-ignored. Copy env.yaml.example to
+# env.yaml and fill it in before deploying.
+includes:
+- env.yaml
+
 automatic_scaling:
   min_instances: 0
   max_instances: 10

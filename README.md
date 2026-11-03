@@ -26,13 +26,26 @@ A web application for manipulating PDF files by adding text boxes to the first p
 
 2. Run the application:
    ```bash
-   python app.py
+   APP_USERNAME=youruser APP_PASSWORD=yourpassword python app.py
    ```
 
 3. Open your browser and navigate to:
    ```
    http://localhost:8080
    ```
+
+## Security
+
+- **Login:** the app requires a username and password (HTTP Basic Auth), read from the
+  `APP_USERNAME` and `APP_PASSWORD` environment variables. They are never stored in the repo:
+  copy `env.yaml.example` to `env.yaml` (git-ignored) for App Engine, or pass them with
+  `--set-env-vars` on Cloud Run. The app refuses to start without them.
+- **No storage:** uploaded PDFs and CSVs are processed in memory and never written to disk
+  or sent to third parties. Filenames and document contents are not logged.
+- **Local runs** bind to `127.0.0.1` only and never enable debug mode. Set `HOST=0.0.0.0`
+  to listen on all interfaces.
+- Requests are rate limited and the upload form is CSRF protected.
+- Dependencies are pinned; run `pip-audit -r requirements.txt` periodically.
 
 ## Usage
 
@@ -45,7 +58,7 @@ A web application for manipulating PDF files by adding text boxes to the first p
 ## Technologies Used
 
 - **Flask**: Web framework for Python
-- **PyPDF2**: For PDF manipulation and page scaling
+- **pypdf**: For PDF manipulation and page scaling
 - **ReportLab**: For creating PDF overlays with text and graphics
 - HTML, CSS, and JavaScript for the frontend
 
